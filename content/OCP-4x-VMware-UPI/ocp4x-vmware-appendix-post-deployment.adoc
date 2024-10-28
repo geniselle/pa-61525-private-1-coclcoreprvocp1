@@ -30,21 +30,189 @@ https://access.redhat.com/documentation/en-us/openshift_container_platform/{ocp_
 = Configuración de registry
 
 // TODO: In an IPI deployment usually the persistent volume is configured automatically by the installer, below lines are here only for reference. Remove if not needed.
-Configuración del volumen persistente para la registry:
+Por defecto, OpenShift 4 utiliza su servicio de registry interno para almacenar las imágenes de los pods que se despliegan. La configuración aplicada se encuentra en la instancia cluster del Custom Resource Definition images.config.openshift.io, la cual se detalla a continuación:
 
-#TODO#
+[source,bash]
+----
+apiVersion: imageregistry.operator.openshift.io/v1
+kind: Config
+metadata:
+  creationTimestamp: "2024-10-16T14:27:51Z"
+  finalizers:
+  - imageregistry.operator.openshift.io/finalizer
+  generation: 10
+  name: cluster
+  resourceVersion: "5430672"
+  uid: 69e7c04c-f42d-40c5-b601-471710111774
+spec:
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - podAffinityTerm:
+          namespaces:
+          - openshift-image-registry
+          topologyKey: kubernetes.io/hostname
+        weight: 100
+  defaultRoute: true
+  httpSecret: 6bf259c18d1859dd3a35379c161d6f36e9e97bc91e2de89a97a83592324d0b43bc1295a41e35b271470ffc5ec41825a9433d651999c36a122ee219a9357a9d1e
+  logLevel: Normal
+  managementState: Managed
+  nodeSelector:
+    node-role.kubernetes.io/infra: ""
+  observedConfig: null
+  operatorLogLevel: Normal
+  proxy: {}
+  replicas: 1
+  requests:
+    read:
+      maxWaitInQueue: 0s
+    write:
+      maxWaitInQueue: 0s
+  rolloutStrategy: Recreate
+  storage:
+    managementState: Unmanaged
+    pvc:
+      claim: image-registry-storage
+  tolerations:
+  - effect: NoSchedule
+    key: node-role.kubernetes.io/infra
+    value: reserved
+  - effect: NoExecute
+    key: node-role.kubernetes.io/infra
+    value: reserved
+  unsupportedConfigOverrides: null
+----
+
+Se creo un volumen persiste de 300Gb para el almacenamiento de imagenes del cluster con los siguientes comandos
+
+[source,bash]
+----
+# Creación de archivo pvc-registry.yaml
+$ cat <<EOF > pvc-registry.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-image-registry
+  namespace: openshift-image-registry
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 300Gi
+  storageClassName: thin-csi
+  volumeMode: Filesystem
+EOF
+
+# Creación de pvc en cluster mediante archivo pvc-registry.yaml
+$ oc apply -f pvc-registry.yaml
+
+----
+
+Aplicada la configuración anteriormente indicada, el servicio de registry intero que utiliza el proyecto openshift-image-registry despliega los siguientes pods, confirmando que los recursos de image-registry se ejecutan en los nodos de infraestructura:
+
+[source,bash]
+----
+$ oc get pods -n openshift-image-registry  -o wide
+NAME                                               READY   STATUS    RESTARTS   AGE    IP            NODE                                                NOMINATED NODE   READINESS GATES
+cluster-image-registry-operator-68cf86fd47-2fqlg   1/1     Running   0          167m   10.71.4.21    cohvcmanopc01.coclcoreprvocp1.corp.popular.local    <none>           <none>
+image-registry-6679cd7c9f-kst8h                    1/1     Running   1          168m   10.71.6.13    cohvciwnopc02.coclcoreprvocp1.corp.popular.local    <none>           <none>
+node-ca-46mss                                      1/1     Running   4          8d     10.32.75.32   cohvcawnopc02.coclcoreprvocp1.corp.popular.local    <none>           <none>
+node-ca-5w729                                      1/1     Running   5          8d     10.32.75.31   cohvcawnopc01.coclcoreprvocp1.corp.popular.local    <none>           <none>
+node-ca-8qn86                                      1/1     Running   4          8d     10.32.75.39   cohvcawnopc09.coclcoreprvocp1.corp.popular.local    <none>           <none>
+node-ca-9mm8t                                      1/1     Running   4          8d     10.32.75.40   cohvcawnopc010.coclcoreprvocp1.corp.popular.local   <none>           <none>
+node-ca-fd4k5                                      1/1     Running   4          8d     10.32.75.36   cohvcawnopc06.coclcoreprvocp1.corp.popular.local    <none>           <none>
+node-ca-fdwg6                                      1/1     Running   4          8d     10.32.75.38   cohvcawnopc08.coclcoreprvocp1.corp.popular.local    <none>           <none>
+node-ca-hf7vv                                      1/1     Running   4          8d     10.32.75.44   cohvcmanopc01.coclcoreprvocp1.corp.popular.local    <none>           <none>
+node-ca-j82td                                      1/1     Running   4          8d     10.32.75.35   cohvcawnopc05.coclcoreprvocp1.corp.popular.local    <none>           <none>
+node-ca-ndqf6                                      1/1     Running   4          8d     10.32.75.37   cohvcawnopc07.coclcoreprvocp1.corp.popular.local    <none>           <none>
+node-ca-nt6dc                                      1/1     Running   4          8d     10.32.75.46   cohvcmanopc03.coclcoreprvocp1.corp.popular.local    <none>           <none>
+node-ca-pbv76                                      1/1     Running   5          8d     10.32.75.41   cohvciwnopc01.coclcoreprvocp1.corp.popular.local    <none>           <none>
+node-ca-pttrh                                      1/1     Running   4          8d     10.32.75.42   cohvciwnopc02.coclcoreprvocp1.corp.popular.local    <none>           <none>
+node-ca-rxnk2                                      1/1     Running   4          8d     10.32.75.43   cohvciwnopc03.coclcoreprvocp1.corp.popular.local    <none>           <none>
+node-ca-twjxd                                      1/1     Running   4          8d     10.32.75.34   cohvcawnopc04.coclcoreprvocp1.corp.popular.local    <none>           <none>
+node-ca-wk6bl                                      1/1     Running   4          8d     10.32.75.33   cohvcawnopc03.coclcoreprvocp1.corp.popular.local    <none>           <none>
+node-ca-zt44t                                      1/1     Running   5          8d     10.32.75.45   cohvcmanopc02.coclcoreprvocp1.corp.popular.local    <none>           <none>
+----
+
+Este registry se configuro para permitir el accesso correspondiente utilizado el servicio y ruta respectiva:
+
+[source,bash]
+----
+$ oc get service -n openshift-image-registry
+NAME                      TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)     AGE
+image-registry            ClusterIP   10.72.94.212   <none>        5000/TCP    7d23h
+image-registry-operator   ClusterIP   None           <none>        60000/TCP   8d
+----
+
+[source,bash]
+----
+$ oc get routes -n openshift-image-registry
+NAME            HOST/PORT                                                                        PATH   SERVICES         PORT    TERMINATION   WILDCARD
+default-route   default-route-openshift-image-registry.apps.coclcoreprvocp1.corp.popular.local          image-registry   <all>   reencrypt     None
+----
+
+Para guardar de manera persistente las imágenes, como se indico se configuró un almacenamiento de 300GB para el registry:
+
+[source,bash]
+----
+$ oc get pvc -n openshift-image-registry
+NAME                     STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+image-registry-storage   Bound    pvc-f21bf37b-b69b-4096-bfa1-d923078c967a   300Gi      RWO            thin-csi       7d23h
+----
+
+Para acceder al registry interno se debe utilizar el siguiente comando, validando el exitoso login al respectivo recurso
+
+[source,bash]
+----
+$ oc whoami --show-token
+sha256~9xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+$ podman login internal-registry.apps.coclcoreprvocp1.corp.popular.local
+username: admin
+password: <token-obtenido>
+Login Succeeded
+----
+
+Para mayor detalle acerca de la configuración y uso del registry interno de OpenShift, consultar los siguientes enlaces:
+
+- https://docs.redhat.com/en/documentation/openshift_container_platform/4.14/html/registry/setting-up-and-configuring-the-registry#registry-configuring-registry-storage-rhodf-cephfs_configuring-registry-storage-vsphere[]
+
+- https://docs.openshift.com/container-platform/4.14/registry/accessing-the-registry.html
+
+- https://docs.openshift.com/container-platform/4.14/registry/securing-exposing-registry.html
 
 = Autenticación
 
 ////
 TODO: This is just an example. Change based on the auth methods that have been configured for the customer.
 ////
-Configuración de la autenticación con httpd.
+= Configuración de proveedor de identidades htpasswd
 
+En esta habilitación se utilizó htpasswd para la gestión de usuarios en el cluster de Openshift, a continuación se lista los usuarios creados:
+
+.Proveedor de identidades
+[options="header"]
+|===
+|User |Password |Role
+
+|admin
+|masT3rpa554dmiN
+|cluster-admin
+
+|===
+
+A continuación se detalla la configuración aplicada para la autenticación con htpasswd.
+
+[source,bash]
 ----
-sudo yum install httpd-tools
-htpasswd -c -B -b users.htpasswd admin 'r3dh4t1!'
-oc create secret generic htpass-secret --from-file=htpasswd=users.htpasswd -n openshift-config
+#Creación de usuario admin mediante htpasswd
+$ htpasswd -c -B -b users.htpasswd admin masT3rpa554dmiN
+
+#Creación de usuario user-test admin mediante htpasswd
+$ htpasswd -B -b users.htpasswd usertest RedHat01.
+
+#Creación de secreto con contenido de archivo users.htpasswd
+$ oc create secret generic htpass-secret --from-file=htpasswd=users.htpasswd -n openshift-config
 
 cat <<EOF > htpasswd-conf.yml
 apiVersion: config.openshift.io/v1
@@ -53,36 +221,373 @@ metadata:
   name: cluster
 spec:
   identityProviders:
-  - name: my_htpasswd_provider
-    mappingMethod: claim
-    type: HTPasswd
-    htpasswd:
-      fileData:
-        name: htpass-secret
+    - htpasswd:
+        fileData:
+          name: htpass-secret
+      mappingMethod: claim
+      name: htpasswd_provider
+      type: HTPasswd
 EOF
 
-oc apply -f htpasswd-conf.yml
-oc adm policy add-cluster-role-to-user cluster-admin admin
+## Comando para aplicar htpasswd provider
+$ oc apply -f htpasswd-conf.yml
+----
 
-oc delete secrets kubeadmin -n kube-system
+Luego de aplicado el provider, se resplegaran los pods del namespace openshift-authenticación, luego se debe validar el login con el usuario admin creado anteriormente:
+
+[source,bash]
+----
+$ oc login -u admin https://api.coclcoreprvocp1.corp.popular.local:6443
+Console URL: https://api.coclcoreprvocp1.corp.popular.local:6443/console
+Authentication required for https://api.coclcoreprvocp1.corp.popular.local:6443 (openshift)
+Username: admin
+Password:
+
+Login successful.
+
+You have access to 67 projects, the list has been suppressed. You can list all projects with 'oc projects'
+
+Using project "default".
+----
+
+posteriormente volviendose a loguear con el usuario kubeadmin, se debe dar permisos de cluster-admin a usuario admin
+[source,bash]
+----
+$ oc adm policy add-cluster-role-to-user cluster-admin admin
+----
+
+= Integración con LDAP - Active Directory
+
+A continuación se detalla el proceso realizado para la integración con LDAP - Active Directory.
+
+
+Creación de secreto para almacenamiento de contraseña de cuenta de servicio de usuario LDAP.
+
+[source,bash]
+----
+$ oc create secret generic ldap-secret-prod
+--from-literal=bindPassword=<contraseña-usuario-ldap> -n openshift-config 
+----
+
+Posteriormente se accedio a la instancia cluster de OAuth para su edición.
+[source,bash]
+----
+$ oc edit oauth cluster
+----
+
+Se añadio en la sección identity provider los ldap respectivos para los usuarios y servicios como se detalla a continuación.
+
+[source,yaml]
+----
+apiVersion: config.openshift.io/v1
+kind: OAuth
+metadata:
+  name: cluster
+spec:
+  identityProviders:
+    - htpasswd:
+        fileData:
+          name: htpass-secret
+      mappingMethod: claim
+      name: htpasswd_provider
+      type: HTPasswd
+    - ldap:
+      attributes:
+        id:
+        - dn
+        name:
+        - cn
+        preferredUsername:
+        - sAMAccountName
+      bindDN: CN=Cuenta de Servicio OpenShift CBT,OU=Cuentas de Servicio,OU=All Users,DC=corp,DC=popular,DC=local
+      bindPassword:
+        name: ldap-secret-prod
+      insecure: true
+      url: ldap://corp.popular.local:389/OU=All Users,DC=corp,DC=popular,DC=local?sAMAccountName
+      mappingMethod: claim
+      name: ldap-prod
+      type: LDAP
+    - htpasswd:
+      fileData:
+        name: htpass-secret
+      mappingMethod: claim
+      name: htpasswd_provider
+      type: HTPasswd
+----
+
+= Eliminación de usuario kubeadmin
+
+Después de definir un proveedor de identidad y crear un nuevo usuario con rol de cluster-admin, se puede eliminar el usuario kubeadmin para mejorar la seguridad del clúster.
+
+Lo anterior se realizo con el siguiente comando oc:
+
+[source,bash]
+----
+$ oc delete secrets kubeadmin -n kube-system
 ----
 
 = Implementación de logging
 
-Implementación:
-#TODO#
+Para poder implementar el reenvío de registros de logs hacia un SYSLOG externo desde OpenShift usando ClusterLogForwarder se aplicaron los siguientes pasos:
 
-Configuración de persistent volume:
-#TODO#
+* Asegurarse de que se tenga conexión a SYSLOG externo desde los nodos master y de infraestructura del cluster.
+* Acceder a la consola web de OpenShift y seguir los siguientes pasos para instalar el operador OpenShift Logging:
+  - Navegar hasta la pestaña "Operators > OperatorHub" y buscar el operator "OpenShift Logging" en la lista de operators disponibles.
+  - Hacer clic en el botón "Install" y seguir los pasos en la pantalla para instalar el operator Logging.
+  - Luego ingresar a la pestaña "Operators > Installed Operators", ingresar al operador "Red Hat OpenShift Logging" y crear la instancia de "Cluster Logging" con los siguientes parametros:
 
-Configuración de node selector:
-#TODO#
+[source,yaml]
+----
+kind: ClusterLogging
+apiVersion: logging.openshift.io/v1
+metadata:
+  name: instance
+  namespace: openshift-logging
+spec:
+  collection:
+    tolerations:
+      - operator: Exists
+    type: vector
+  managementState: Managed
+----
 
+
+* Para configurar el reenvío de registros a una instancia externa de SYSLOG, se debe crear el recurso o instancia ClusterLogForwarding. Esto accediendo a la pestaña "Operators > Installed Operators", ingresar al operador "Red Hat OpenShift Logging" y crear la instancia de " ClusterLogForwarder" con los siguientes datos:
+
+[source,yaml]
+----
+apiVersion: logging.openshift.io/v1
+kind: ClusterLogForwarder
+metadata:
+  name: instance
+  namespace: openshift-logging
+spec:
+  outputs:
+    - name: bpd-syslog-10.32.6.111
+      syslog:
+        appName: openshift
+        facility: user
+        procID: openshift-logging
+        rfc: RFC5424
+        severity: informational
+      type: syslog
+      url: 'tcp://10.32.6.111:514'
+  pipelines:
+    - inputRefs:
+        - audit
+      labels:
+        cluster: coclcoreprvocp1
+      name: audit-logs
+      outputRefs:
+        - bpd-syslog-10.32.6.111
+      parse: json
+----
+
+Lo anterior despliega los pods de recolección de logs en todos los nodos del cluster, tal como se muestra a continuación:
+
+[source,bash]
+----
+oc get pods -n openshift-logging -owide
+NAME                                        READY   STATUS    RESTARTS   AGE    IP            NODE                                                NOMINATED NODE   READINESS GATES
+cluster-logging-operator-6769658787-7mhh7   1/1     Running   0          177m   10.71.18.7    cohvcawnopc02.coclcoreprvocp1.corp.popular.local    <none>           <none>
+collector-25zfs                             1/1     Running   2          7d5h   10.71.14.28   cohvcawnopc010.coclcoreprvocp1.corp.popular.local   <none>           <none>
+collector-2x22g                             1/1     Running   2          7d5h   10.71.2.136   cohvcmanopc03.coclcoreprvocp1.corp.popular.local    <none>           <none>
+collector-44gc8                             1/1     Running   2          7d5h   10.71.4.150   cohvcmanopc01.coclcoreprvocp1.corp.popular.local    <none>           <none>
+collector-4dz2z                             1/1     Running   3          7d5h   10.71.1.232   cohvcmanopc02.coclcoreprvocp1.corp.popular.local    <none>           <none>
+collector-579x5                             1/1     Running   2          7d5h   10.71.8.52    cohvciwnopc03.coclcoreprvocp1.corp.popular.local    <none>           <none>
+collector-58bxh                             1/1     Running   2          7d5h   10.71.18.19   cohvcawnopc02.coclcoreprvocp1.corp.popular.local    <none>           <none>
+collector-6fq6q                             1/1     Running   3          7d5h   10.71.12.28   cohvcawnopc01.coclcoreprvocp1.corp.popular.local    <none>           <none>
+collector-9zt4m                             1/1     Running   3          7d5h   10.71.10.34   cohvciwnopc01.coclcoreprvocp1.corp.popular.local    <none>           <none>
+collector-fp4p2                             1/1     Running   2          7d5h   10.71.30.14   cohvcawnopc08.coclcoreprvocp1.corp.popular.local    <none>           <none>
+collector-g8snq                             1/1     Running   2          7d5h   10.71.28.14   cohvcawnopc09.coclcoreprvocp1.corp.popular.local    <none>           <none>
+collector-kxbl6                             1/1     Running   2          7d5h   10.71.26.67   cohvcawnopc07.coclcoreprvocp1.corp.popular.local    <none>           <none>
+collector-pqz9b                             1/1     Running   2          7d5h   10.71.20.20   cohvcawnopc04.coclcoreprvocp1.corp.popular.local    <none>           <none>
+collector-qn6w6                             1/1     Running   2          7d5h   10.71.6.51    cohvciwnopc02.coclcoreprvocp1.corp.popular.local    <none>           <none>
+collector-r5ntp                             1/1     Running   2          7d5h   10.71.24.14   cohvcawnopc06.coclcoreprvocp1.corp.popular.local    <none>           <none>
+collector-tt5fh                             1/1     Running   2          7d5h   10.71.16.47   cohvcawnopc03.coclcoreprvocp1.corp.popular.local    <none>           <none>
+collector-x56kz                             1/1     Running   2          7d5h   10.71.22.17   cohvcawnopc05.coclcoreprvocp1.corp.popular.local    <none>           <none>
+----
+Las instancias de tanto ClusterLogging y ClusterLogForwarder quedaron en estado Ready como se muestra en la siguiente imagen, confirmando que la implementación esta correctamente configurada.
+
+.Instancias ClusterLogging y ClusterlogForwarder
+image::OCP-4x-VMware-UPI/logging2.png[pdfwidth=99%,width=99%]
 
 = Configuración de Monitoring
 
-Configuración de persistent volume:
-#TODO#
+El stack de monitoreo incluye varios componentes, como Prometheus, Thanos Querier y Alertmanager. El operador de monitoreo de clúster administra este stack. Para  implementar el stack de monitoreo en los nodos de infraestructura y darle persistencia, puede crear y aplicar un configmap personalizado.
 
-Configuración de node selector:
-#TODO#
+Se crear el configmap cluster-monitoring-config en namespace openshift-monitoring con la siguiente configuración: 
+
+.Configmap cluster-monitoring-config
+[source,bash]
+----
+$ cat <<EOF > cluster-monitoring-config.yaml
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: cluster-monitoring-config
+  namespace: openshift-monitoring
+data:
+  config.yaml: |
+    enableUserWorkload: true
+    prometheusOperator:
+      nodeSelector:
+        node-role.kubernetes.io/infra: ""
+      tolerations:
+      - key: node-role.kubernetes.io/infra
+        value: reserved
+        effect: NoSchedule
+      - key: node-role.kubernetes.io/infra
+        value: reserved
+        effect: NoExecute
+    prometheusK8s:
+      retention: 7d
+      volumeClaimTemplate:
+        spec:
+          storageClassName: thin-csi
+          resources:
+            requests:
+              storage: 40Gi
+      nodeSelector:
+        node-role.kubernetes.io/infra: ""
+      tolerations:
+      - key: node-role.kubernetes.io/infra
+        value: reserved
+        effect: NoSchedule
+      - key: node-role.kubernetes.io/infra
+        value: reserved
+        effect: NoExecute
+    alertmanagerMain:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: thin-csi
+          resources:
+            requests:
+              storage: 10Gi
+      nodeSelector:
+        node-role.kubernetes.io/infra: ""
+      tolerations:
+      - key: node-role.kubernetes.io/infra
+        value: reserved
+        effect: NoSchedule
+      - key: node-role.kubernetes.io/infra
+        value: reserved
+        effect: NoExecute
+    kubeStateMetrics:
+      nodeSelector:
+        node-role.kubernetes.io/infra: ""
+      tolerations:
+      - key: node-role.kubernetes.io/infra
+        value: reserved
+        effect: NoSchedule
+      - key: node-role.kubernetes.io/infra
+        value: reserved
+        effect: NoExecute
+    monitoringPlugin:
+      nodeSelector:
+        node-role.kubernetes.io/infra: ""
+      tolerations:
+      - key: node-role.kubernetes.io/infra
+        value: reserved
+        effect: NoSchedule
+      - key: node-role.kubernetes.io/infra
+        value: reserved
+        effect: NoExecute
+    openshiftStateMetrics:
+      nodeSelector:
+        node-role.kubernetes.io/infra: ""
+      tolerations:
+      - key: node-role.kubernetes.io/infra
+        value: reserved
+        effect: NoSchedule
+      - key: node-role.kubernetes.io/infra
+        value: reserved
+        effect: NoExecute
+    telemeterClient:
+      nodeSelector:
+        node-role.kubernetes.io/infra: ""
+      tolerations:
+      - key: node-role.kubernetes.io/infra
+        value: reserved
+        effect: NoSchedule
+      - key: node-role.kubernetes.io/infra
+        value: reserved
+        effect: NoExecute
+    k8sPrometheusAdapter:
+      nodeSelector:
+        node-role.kubernetes.io/infra: ""
+      tolerations:
+      - key: node-role.kubernetes.io/infra
+        value: reserved
+        effect: NoSchedule
+      - key: node-role.kubernetes.io/infra
+        value: reserved
+        effect: NoExecute
+    thanosQuerier:
+      nodeSelector:
+        node-role.kubernetes.io/infra: ""
+      tolerations:
+      - key: node-role.kubernetes.io/infra
+        value: reserved
+        effect: NoSchedule
+      - key: node-role.kubernetes.io/infra
+        value: reserved
+        effect: NoExecute
+EOF
+
+#Se aplica configmap con el siguiente comando
+$ oc apply -f cluster-monitoring-config.yaml
+----
+
+Lo anterior despliega los pods del stack de monitoreo en los nodos de infraestructura y crea persistencia de datos.
+
+.Pods de stack de monitoreo en nodos de infraestructura
+[source,bash]
+----
+$ oc get pods -n openshift-monitoring -o wide
+NAME                                                     READY   STATUS    RESTARTS   AGE     IP            NODE                                                NOMINATED NODE   READINESS GATES
+alertmanager-main-0                                      6/6     Running   6          3h23m   10.71.6.14    cohvciwnopc02.coclcoreprvocp1.corp.popular.local    <none>           <none>
+alertmanager-main-1                                      6/6     Running   6          3h19m   10.71.8.12    cohvciwnopc03.coclcoreprvocp1.corp.popular.local    <none>           <none>
+cluster-monitoring-operator-7c485cbb96-drwjm             1/1     Running   0          3h22m   10.71.4.38    cohvcmanopc01.coclcoreprvocp1.corp.popular.local    <none>           <none>
+kube-state-metrics-685b949b58-8s4vw                      3/3     Running   3          3h23m   10.71.6.9     cohvciwnopc02.coclcoreprvocp1.corp.popular.local    <none>           <none>
+monitoring-plugin-55d884c89f-r6qg6                       1/1     Running   1          3h23m   10.71.6.10    cohvciwnopc02.coclcoreprvocp1.corp.popular.local    <none>           <none>
+monitoring-plugin-55d884c89f-zx4h8                       1/1     Running   1          3h19m   10.71.8.5     cohvciwnopc03.coclcoreprvocp1.corp.popular.local    <none>           <none>
+node-exporter-2s8qf                                      2/2     Running   10         8d      10.32.75.41   cohvciwnopc01.coclcoreprvocp1.corp.popular.local    <none>           <none>
+node-exporter-4j8zz                                      2/2     Running   8          8d      10.32.75.38   cohvcawnopc08.coclcoreprvocp1.corp.popular.local    <none>           <none>
+node-exporter-59gxl                                      2/2     Running   8          8d      10.32.75.39   cohvcawnopc09.coclcoreprvocp1.corp.popular.local    <none>           <none>
+node-exporter-5g662                                      2/2     Running   8          8d      10.32.75.42   cohvciwnopc02.coclcoreprvocp1.corp.popular.local    <none>           <none>
+node-exporter-5gsls                                      2/2     Running   8          8d      10.32.75.35   cohvcawnopc05.coclcoreprvocp1.corp.popular.local    <none>           <none>
+node-exporter-79vht                                      2/2     Running   8          8d      10.32.75.40   cohvcawnopc010.coclcoreprvocp1.corp.popular.local   <none>           <none>
+node-exporter-88rg5                                      2/2     Running   8          8d      10.32.75.34   cohvcawnopc04.coclcoreprvocp1.corp.popular.local    <none>           <none>
+node-exporter-8d2nw                                      2/2     Running   8          8d      10.32.75.44   cohvcmanopc01.coclcoreprvocp1.corp.popular.local    <none>           <none>
+node-exporter-fptjt                                      2/2     Running   10         8d      10.32.75.45   cohvcmanopc02.coclcoreprvocp1.corp.popular.local    <none>           <none>
+node-exporter-k8p5v                                      2/2     Running   8          8d      10.32.75.32   cohvcawnopc02.coclcoreprvocp1.corp.popular.local    <none>           <none>
+node-exporter-m7ff2                                      2/2     Running   8          8d      10.32.75.33   cohvcawnopc03.coclcoreprvocp1.corp.popular.local    <none>           <none>
+node-exporter-mdh87                                      2/2     Running   8          8d      10.32.75.37   cohvcawnopc07.coclcoreprvocp1.corp.popular.local    <none>           <none>
+node-exporter-pvqk5                                      2/2     Running   10         8d      10.32.75.31   cohvcawnopc01.coclcoreprvocp1.corp.popular.local    <none>           <none>
+node-exporter-qd85q                                      2/2     Running   8          8d      10.32.75.46   cohvcmanopc03.coclcoreprvocp1.corp.popular.local    <none>           <none>
+node-exporter-rdlvh                                      2/2     Running   8          8d      10.32.75.36   cohvcawnopc06.coclcoreprvocp1.corp.popular.local    <none>           <none>
+node-exporter-x9jnl                                      2/2     Running   8          8d      10.32.75.43   cohvciwnopc03.coclcoreprvocp1.corp.popular.local    <none>           <none>
+openshift-state-metrics-7fb497c447-pj8pq                 3/3     Running   3          3h23m   10.71.6.8     cohvciwnopc02.coclcoreprvocp1.corp.popular.local    <none>           <none>
+prometheus-adapter-74f7d8798f-r6hx7                      1/1     Running   1          3h23m   10.71.6.12    cohvciwnopc02.coclcoreprvocp1.corp.popular.local    <none>           <none>
+prometheus-adapter-74f7d8798f-vdmhd                      1/1     Running   1          3h19m   10.71.8.7     cohvciwnopc03.coclcoreprvocp1.corp.popular.local    <none>           <none>
+prometheus-k8s-0                                         6/6     Running   6          3h23m   10.71.6.15    cohvciwnopc02.coclcoreprvocp1.corp.popular.local    <none>           <none>
+prometheus-k8s-1                                         6/6     Running   6          3h19m   10.71.8.13    cohvciwnopc03.coclcoreprvocp1.corp.popular.local    <none>           <none>
+prometheus-operator-5b75cf6477-vshz4                     2/2     Running   2          3h23m   10.71.6.5     cohvciwnopc02.coclcoreprvocp1.corp.popular.local    <none>           <none>
+prometheus-operator-admission-webhook-847d7cfb77-6jp24   1/1     Running   1          3h19m   10.71.8.8     cohvciwnopc03.coclcoreprvocp1.corp.popular.local    <none>           <none>
+prometheus-operator-admission-webhook-847d7cfb77-v7z9f   1/1     Running   1          3h23m   10.71.6.7     cohvciwnopc02.coclcoreprvocp1.corp.popular.local    <none>           <none>
+telemeter-client-6875bf5575-hdvcn                        3/3     Running   3          3h23m   10.71.6.16    cohvciwnopc02.coclcoreprvocp1.corp.popular.local    <none>           <none>
+thanos-querier-645d584db9-5nqt6                          6/6     Running   6          3h19m   10.71.8.9     cohvciwnopc03.coclcoreprvocp1.corp.popular.local    <none>           <none>
+thanos-querier-645d584db9-cdtjb                          6/6     Running   6          3h23m   10.71.6.11    cohvciwnopc02.coclcoreprvocp1.corp.popular.local    <none>           <none>
+----
+
+.Persistencia de datos de stack de monitoreo
+[source,bash]
+----
+$ oc get pvc -n openshift-monitoring -o wide
+NAME                                       STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   AGE     VOLUMEMODE
+alertmanager-main-db-alertmanager-main-0   Bound    pvc-9a935300-f6f8-475b-aef1-d07814eccd29   10Gi       RWO            thin-csi       7d23h   Filesystem
+alertmanager-main-db-alertmanager-main-1   Bound    pvc-531117ab-b434-4269-b459-605cb0e7ee8d   10Gi       RWO            thin-csi       7d23h   Filesystem
+prometheus-k8s-db-prometheus-k8s-0         Bound    pvc-a30a546c-5561-4d02-ab0d-2b0a83aced6e   40Gi       RWO            thin-csi       7d23h   Filesystem
+prometheus-k8s-db-prometheus-k8s-1         Bound    pvc-7c26632e-f3a8-4f85-9cc7-8079f58c4f78   40Gi       RWO            thin-csi       7d23h   Filesystem
+----
